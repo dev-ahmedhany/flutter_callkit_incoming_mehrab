@@ -1,5 +1,30 @@
 # Flutter Callkit Incoming
 
+> **Standalone copy maintained for [mehrab-app](https://github.com/dev-ahmedhany/mehrab-app).**
+>
+> Derived from [hiennguyen92/flutter_callkit_incoming](https://github.com/hiennguyen92/flutter_callkit_incoming)
+> (MIT — see [LICENSE](LICENSE), copyright retained). This is a separate repository
+> rather than a GitHub fork, so it is unaffected by anything that happens to the
+> upstream repository or its fork network.
+>
+> Local changes on top of upstream 3.0.0, both fixing "no incoming call when the
+> app is fully closed":
+>
+> - **Android** — `onDetachedFromActivity` no longer nulls the process-wide static
+>   `instance.context`, and `initSharedInstance` restores it on every engine
+>   attach. Previously, when a foreground service kept the process alive after the
+>   app was swiped away, `showCallkitIncoming` hit `context?.sendBroadcast(...)` on
+>   a null context and silently did nothing. (Same fix as upstream `9ed079e7`.)
+> - **iOS** — new `SwiftFlutterCallkitIncomingPlugin.setup()` so an app can create
+>   `sharedInstance` from `application:didFinishLaunchingWithOptions:`. Under the
+>   UIScene lifecycle, plugin registration is deferred until a scene connects, but
+>   a PushKit VoIP push relaunches a terminated app headlessly — leaving
+>   `sharedInstance` nil, the call unreported to CallKit, and iOS eventually
+>   refusing to deliver VoIP pushes at all.
+>
+> Upstream is tracked as the `upstream` git remote. Everything below is upstream's
+> own documentation.
+
 A Flutter plugin to show incoming call in your Flutter app (Custom for Android/Callkit for iOS).
 
 [![pub package](https://img.shields.io/pub/v/flutter_callkit_incoming.svg)](https://pub.dev/packages/flutter_callkit_incoming)
