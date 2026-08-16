@@ -315,7 +315,12 @@ public class SwiftFlutterCallkitIncomingPlugin: NSObject, FlutterPlugin, CXProvi
             return
         }
 
-        self.configureAudioSession()
+        // Do NOT configure the audio session before reportNewIncomingCall.
+        // When maximumCallsPerCallGroup == 1 and a call is already active, iOS
+        // rejects the new call (error != nil). Re-activating the shared
+        // AVAudioSession up front would, in that rejected case, still interrupt
+        // the active call's audio (e.g. WebRTC breakage). Configure it only once
+        // the call is successfully reported, matching the fromPushKit variant.
         self.sharedProvider?.reportNewIncomingCall(with: uuid, update: callUpdate) { error in
             if(error == nil) {
                 self.configureAudioSession()
