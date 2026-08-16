@@ -1,9 +1,11 @@
 package com.hiennv.flutter_callkit_incoming
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.Bundle
@@ -109,8 +111,14 @@ class CallkitNotificationService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             var foregroundServiceType = ServiceInfo.FOREGROUND_SERVICE_TYPE_PHONE_CALL
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                foregroundServiceType = foregroundServiceType or
-                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                // Since Android 14 (API 34), starting a foreground service with the
+                // MICROPHONE type throws a SecurityException unless RECORD_AUDIO is
+                // already granted — e.g. the user can answer a call before the app
+                // has ever requested the mic. Only claim the type when it is allowed.
+                if (isPermissionGranted(Manifest.permission.RECORD_AUDIO)) {
+                    foregroundServiceType = foregroundServiceType or
+                            ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                }
             }
             startForeground(
                 callkitNotification.id,
@@ -121,6 +129,9 @@ class CallkitNotificationService : Service() {
             startForeground(callkitNotification.id, callkitNotification.notification)
         }
     }
+
+    private fun isPermissionGranted(permission: String): Boolean =
+        ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED
 
     private fun buildPlaceholderNotification(data: Bundle): CallkitNotification {
         val notificationId = getOngoingNotificationId(data)
