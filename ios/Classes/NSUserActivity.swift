@@ -8,12 +8,17 @@
 import Foundation
 import Intents
 
+// Since iOS 13 a call started from Recents / Siri / Contacts arrives as a
+// single INStartCallIntent (audio or video told apart by callCapability).
+// The old INStartAudioCallIntent / INStartVideoCallIntent pair is deprecated
+// and is no longer what the system sends, so matching only those made
+// `handle` nil for every real call-back.
 extension NSUserActivity: StartCallConvertible {
 
     public var handle: String? {
         guard
           let interaction = interaction,
-          let startCallIntent = interaction.intent as? SupportedStartCallIntent,
+          let startCallIntent = interaction.intent as? INStartCallIntent,
           let contact = startCallIntent.contacts?.first
         else {
             return nil
@@ -25,14 +30,14 @@ extension NSUserActivity: StartCallConvertible {
     public var isVideo: Bool? {
         guard
           let interaction = interaction,
-          let startCallIntent = interaction.intent as? SupportedStartCallIntent
+          let startCallIntent = interaction.intent as? INStartCallIntent
         else {
             return nil
         }
 
-        return startCallIntent is INStartVideoCallIntent
+        return startCallIntent.callCapability == .videoCall
     }
-    
+
 }
 
 
@@ -48,11 +53,3 @@ extension StartCallConvertible {
     }
 
 }
-
-
-protocol SupportedStartCallIntent {
-    var contacts: [INPerson]? { get }
-}
-
-extension INStartAudioCallIntent: SupportedStartCallIntent {}
-extension INStartVideoCallIntent: SupportedStartCallIntent {}

@@ -16,7 +16,9 @@ Flutter Callkit Incoming
   s.source_files = 'Classes/**/*'
   s.dependency 'Flutter'
   s.dependency 'CryptoSwift'
-  s.platform = :ios, '10.0'
+  # mehrab's floor. The Swift uses iOS 13/14 APIs (INStartCallIntent,
+  # UIWindowScene, .banner/.list, CXProviderConfiguration()) without guards.
+  s.platform = :ios, '15.0'
 
   # Flutter.framework does not contain a i386 slice.
   s.pod_target_xcconfig = { 'DEFINES_MODULE' => 'YES', 'VALID_ARCHS[sdk=iphonesimulator*]' => 'x86_64' }

@@ -554,7 +554,9 @@ public class SwiftFlutterCallkitIncomingPlugin: NSObject, FlutterPlugin, CXProvi
     }
     
     func createConfiguration(_ data: Data) -> CXProviderConfiguration {
-        let configuration = CXProviderConfiguration(localizedName: data.appName)
+        // init(localizedName:) is deprecated since iOS 14: CallKit shows the
+        // app's bundle display name whatever is passed, so data.appName is moot.
+        let configuration = CXProviderConfiguration()
         configuration.supportsVideo = data.supportsVideo
         configuration.maximumCallGroups = data.maximumCallGroups
         configuration.maximumCallsPerCallGroup = data.maximumCallsPerCallGroup
@@ -595,7 +597,7 @@ public class SwiftFlutterCallkitIncomingPlugin: NSObject, FlutterPlugin, CXProvi
                 try session.setCategory(AVAudioSession.Category.playAndRecord, options: [
                     .allowBluetoothA2DP,
                     .duckOthers,
-                    .allowBluetooth,
+                    .allowBluetoothHFP,
                 ])
                 
                 try session.setMode(self.getAudioSessionMode(data?.audioSessionMode))

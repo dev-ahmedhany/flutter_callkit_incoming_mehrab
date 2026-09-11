@@ -18,11 +18,21 @@ public class CallkitNotificationManager: NSObject {
     private override init() {
         super.init()
     }
-    
+
+    // UIApplication.keyWindow is deprecated because it ignores scenes; this is
+    // the key window of whichever connected scene holds it.
+    private var keyWindow: UIWindow? {
+        return UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }
+            .flatMap { $0.windows }
+            .first { $0.isKeyWindow }
+    }
+
     public func userNotificationCenter(_ center: UNUserNotificationCenter,
                                        willPresent notification: UNNotification,
                                        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
-        completionHandler([.alert, .sound, .badge])
+        // iOS 14 split .alert into .banner (on screen) and .list (Notification Centre).
+        completionHandler([.banner, .list, .sound, .badge])
     }
     
     public func addNotificationCategory(_ nameCallbackAction: String) {
@@ -63,7 +73,7 @@ public class CallkitNotificationManager: NSObject {
                             }
                         }
                     })
-                    UIApplication.shared.keyWindow?.rootViewController?.present(alert, animated: true)
+                    self.keyWindow?.rootViewController?.present(alert, animated: true)
                 }
                 
             case .denied:
@@ -78,7 +88,7 @@ public class CallkitNotificationManager: NSObject {
                             UIApplication.shared.open(settingsUrl)
                         }
                     })
-                    UIApplication.shared.keyWindow?.rootViewController?.present(alert, animated: true)
+                    self.keyWindow?.rootViewController?.present(alert, animated: true)
                 }
                 
             case .authorized, .provisional, .ephemeral:
