@@ -53,23 +53,8 @@ class CallkitNotificationService : Service() {
 
     }
 
-    private var localSoundPlayerManager: CallkitSoundPlayerManager? = null
-    private var localNotificationManager: CallkitNotificationManager? = null
-
-    private fun getCallkitNotificationManager(): CallkitNotificationManager {
-
-        FlutterCallkitIncomingPlugin.getInstance()
-            ?.getCallkitNotificationManager()
-            ?.let { return it }
-        localNotificationManager?.let { return it }
-        val soundManager = localSoundPlayerManager
-            ?: CallkitSoundPlayerManager(applicationContext).also {
-                localSoundPlayerManager = it
-            }
-        return CallkitNotificationManager(applicationContext, soundManager).also {
-            localNotificationManager = it
-        }
-    }
+    private fun getCallkitNotificationManager(): CallkitNotificationManager =
+        CallkitNotificationManager.shared(applicationContext)
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val action = intent?.action
@@ -171,13 +156,6 @@ class CallkitNotificationService : Service() {
             data.getString(CallkitConstants.EXTRA_CALLKIT_ID, "callkit_incoming")
         )
         return callingId.hashCode()
-    }
-
-    override fun onDestroy() {
-        localNotificationManager?.destroy()
-        localNotificationManager = null
-        localSoundPlayerManager = null
-        super.onDestroy()
     }
 
     override fun onBind(p0: Intent?): IBinder? {

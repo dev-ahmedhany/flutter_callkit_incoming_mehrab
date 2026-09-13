@@ -98,12 +98,10 @@ class FlutterCallkitIncomingPlugin : FlutterPlugin, MethodCallHandler, ActivityA
             // when the host process is kept alive (e.g. foreground services),
             // so `onAttachedToEngine` must refresh these fields every time;
             // otherwise background-isolate calls end up as silent no-ops.
-            if (instance.callkitSoundPlayerManager == null) {
-                instance.callkitSoundPlayerManager = CallkitSoundPlayerManager(context)
-            }
-            if (instance.callkitNotificationManager == null) {
-                instance.callkitNotificationManager = CallkitNotificationManager(context, instance.callkitSoundPlayerManager)
-            }
+            // Process-wide managers: every engine, the receiver and the ongoing-call
+            // service share one ringtone player and one notification manager.
+            instance.callkitSoundPlayerManager = CallkitSoundPlayerManager.shared(context)
+            instance.callkitNotificationManager = CallkitNotificationManager.shared(context)
             if (instance.context == null) {
                 instance.context = context
             }
@@ -148,13 +146,8 @@ class FlutterCallkitIncomingPlugin : FlutterPlugin, MethodCallHandler, ActivityA
 
     public fun showIncomingNotification(data: Data) {
         data.from = "notification"
-        //send BroadcastReceiver
-        context?.sendBroadcast(
-            CallkitIncomingBroadcastReceiver.getIntentIncoming(
-                requireNotNull(context),
-                data.toBundle()
-            )
-        )
+        val ctx = context ?: return
+        CallkitIncomingPresenter.show(ctx, data.toBundle(), "native")
     }
 
     public fun showMissCallNotification(data: Data) {
@@ -204,15 +197,39 @@ class FlutterCallkitIncomingPlugin : FlutterPlugin, MethodCallHandler, ActivityA
                 "showCallkitIncoming" -> {
                     val data = Data(call.arguments() ?: HashMap())
                     data.from = "notification"
-                    //send BroadcastReceiver
-                    context?.sendBroadcast(
-                        CallkitIncomingBroadcastReceiver.getIntentIncoming(
-                            requireNotNull(context),
-                            data.toBundle()
-                        )
-                    )
+                    // Straight to the presenter rather than through a broadcast: every show
+                    // then runs on the main thread in one order, and the ring ledger lets
+                    // exactly one of them ring.
+                    val shown = context?.let {
+                        CallkitIncomingPresenter.show(it, data.toBundle(), "dart")
+                    }
+                    result.success(shown != CallkitIncomingPresenter.ShowResult.FAILED)
+                }
 
-                    result.success(true)
+                // Take the right to ring a call before showing it. Returns "claimed",
+                // "duplicate" (another path already has it) or "ended" (already accepted,
+                // ended or cancelled on this device). Fails open to "claimed".
+                "claimIncoming" -> {
+                    val id = call.argument<String>("id").orEmpty()
+                    val source = call.argument<String>("source") ?: "dart"
+                    val ctx = context
+                    if (id.isEmpty() || ctx == null) {
+                        result.success("claimed")
+                        return
+                    }
+                    result.success(
+                        when (RingLedger.claim(ctx, id, source)) {
+                            RingLedgerState.Claim.CLAIMED -> "claimed"
+                            RingLedgerState.Claim.DUPLICATE -> "duplicate"
+                            RingLedgerState.Claim.ENDED -> "ended"
+                        }
+                    )
+                }
+
+                // Take down a ring cancelled elsewhere, without sending a DECLINE.
+                "dismissIncoming" -> {
+                    val id = call.argument<String>("id").orEmpty()
+                    result.success(context?.let { CallkitIncomingPresenter.dismiss(it, id) } ?: false)
                 }
 
                 "showCallkitIncomingSilently" -> {
@@ -389,15 +406,9 @@ class FlutterCallkitIncomingPlugin : FlutterPlugin, MethodCallHandler, ActivityA
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
         methodChannels.remove(binding.binaryMessenger)?.setMethodCallHandler(null)
         eventChannels.remove(binding.binaryMessenger)?.setStreamHandler(null)
-
-        // Only destroy managers when all engine bindings are detached
-        // This prevents issues when foreground services detach but main app is still running
-        if (methodChannels.isEmpty() && eventChannels.isEmpty()) {
-            instance.callkitSoundPlayerManager?.destroy()
-            instance.callkitNotificationManager?.destroy()
-            instance.callkitSoundPlayerManager = null
-            instance.callkitNotificationManager = null
-        }
+        // The managers are process-wide and deliberately outlive every engine: a ring
+        // shown natively, or by a background isolate that has since detached, must still
+        // be stoppable. Destroying them here used to silence such a ring mid-call.
     }
 
     override fun onAttachedToActivity(binding: ActivityPluginBinding) {

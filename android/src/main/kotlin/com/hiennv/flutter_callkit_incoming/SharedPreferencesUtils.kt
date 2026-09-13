@@ -2,75 +2,89 @@ package com.hiennv.flutter_callkit_incoming
 
 import android.content.Context
 import android.content.SharedPreferences
-import android.util.Log
 import com.fasterxml.jackson.core.type.TypeReference
 
 
 private const val CALLKIT_PREFERENCES_FILE_NAME = "flutter_callkit_incoming"
-private var prefs: SharedPreferences? = null
-private var editor: SharedPreferences.Editor? = null
+private const val ACTIVE_CALLS_KEY = "ACTIVE_CALLS"
 
-private fun initInstance(context: Context) {
-    prefs = context.getSharedPreferences(CALLKIT_PREFERENCES_FILE_NAME, Context.MODE_PRIVATE)
-    editor = prefs?.edit()
-}
+/**
+ * Serialises every read-modify-write of ACTIVE_CALLS.
+ *
+ * These helpers used to share one global prefs/editor pair, reassigned on every call,
+ * so an add from a push-service thread could interleave with the main thread's remove
+ * and lose a call.
+ */
+private val activeCallsLock = Any()
 
+private fun prefs(context: Context): SharedPreferences =
+    context.getSharedPreferences(CALLKIT_PREFERENCES_FILE_NAME, Context.MODE_PRIVATE)
 
-fun addCall(context: Context?, data: Data, isAccepted: Boolean = false) {
-    val json = getString(context, "ACTIVE_CALLS", "[]")
-    val arrayData: ArrayList<Data> = Utils.getGsonInstance()
-        .readValue(json, object : TypeReference<ArrayList<Data>>() {})
-    val currentData = arrayData.find { it == data }
-    if(currentData != null) {
-        currentData.isAccepted = isAccepted
-    }else {
-        data.isAccepted = isAccepted
-        arrayData.add(data)
-    }
-    putString(context, "ACTIVE_CALLS", Utils.getGsonInstance().writeValueAsString(arrayData))
-}
-
-fun removeCall(context: Context?, data: Data) {
-    val json = getString(context, "ACTIVE_CALLS", "[]")
-    Log.d("JSON", json!!)
-    val arrayData: ArrayList<Data> = Utils.getGsonInstance()
-        .readValue(json, object : TypeReference<ArrayList<Data>>() {})
-    arrayData.remove(data)
-    putString(context, "ACTIVE_CALLS", Utils.getGsonInstance().writeValueAsString(arrayData))
-}
-
-fun removeAllCalls(context: Context?) {
-    putString(context, "ACTIVE_CALLS", "[]")
-    remove(context, "ACTIVE_CALLS")
-}
-
-fun getDataActiveCalls(context: Context?): ArrayList<Data> {
-    val json = getString(context, "ACTIVE_CALLS", "[]")
+private fun readActiveCalls(context: Context): ArrayList<Data> {
+    val json = getString(context, ACTIVE_CALLS_KEY, "[]") ?: "[]"
     return Utils.getGsonInstance()
         .readValue(json, object : TypeReference<ArrayList<Data>>() {})
 }
 
+
+fun addCall(context: Context?, data: Data, isAccepted: Boolean = false) {
+    if (context == null) return
+    synchronized(activeCallsLock) {
+        val arrayData = readActiveCalls(context)
+        val currentData = arrayData.find { it == data }
+        if (currentData != null) {
+            currentData.isAccepted = isAccepted
+        } else {
+            data.isAccepted = isAccepted
+            arrayData.add(data)
+        }
+        putString(context, ACTIVE_CALLS_KEY, Utils.getGsonInstance().writeValueAsString(arrayData))
+    }
+}
+
+fun removeCall(context: Context?, data: Data) {
+    if (context == null) return
+    synchronized(activeCallsLock) {
+        val arrayData = readActiveCalls(context)
+        arrayData.remove(data)
+        putString(context, ACTIVE_CALLS_KEY, Utils.getGsonInstance().writeValueAsString(arrayData))
+    }
+}
+
+fun removeAllCalls(context: Context?) {
+    if (context == null) return
+    synchronized(activeCallsLock) {
+        remove(context, ACTIVE_CALLS_KEY)
+    }
+}
+
+fun getDataActiveCalls(context: Context?): ArrayList<Data> {
+    if (context == null) return ArrayList()
+    synchronized(activeCallsLock) {
+        return readActiveCalls(context)
+    }
+}
+
 fun getDataActiveCallsForFlutter(context: Context?): ArrayList<Map<String, Any?>> {
-    val json = getString(context, "ACTIVE_CALLS", "[]")
-    return Utils.getGsonInstance().readValue(json, object : TypeReference<ArrayList<Map<String, Any?>>>() {})
+    if (context == null) return ArrayList()
+    val json = synchronized(activeCallsLock) {
+        getString(context, ACTIVE_CALLS_KEY, "[]")
+    } ?: "[]"
+    return Utils.getGsonInstance()
+        .readValue(json, object : TypeReference<ArrayList<Map<String, Any?>>>() {})
 }
 
 fun putString(context: Context?, key: String, value: String?) {
     if (context == null) return
-    initInstance(context)
-    editor?.putString(key, value)
-    editor?.commit()
+    prefs(context).edit().putString(key, value).commit()
 }
 
 fun getString(context: Context?, key: String, defaultValue: String = ""): String? {
     if (context == null) return null
-    initInstance(context)
-    return prefs?.getString(key, defaultValue)
+    return prefs(context).getString(key, defaultValue)
 }
 
 fun remove(context: Context?, key: String) {
     if (context == null) return
-    initInstance(context)
-    editor?.remove(key)
-    editor?.commit()
+    prefs(context).edit().remove(key).commit()
 }

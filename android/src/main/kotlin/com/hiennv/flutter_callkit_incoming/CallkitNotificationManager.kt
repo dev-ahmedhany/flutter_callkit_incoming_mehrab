@@ -43,6 +43,24 @@ class CallkitNotificationManager(
         const val NOTIFICATION_CHANNEL_ID_ONGOING = "callkit_ongoing_channel_id"
         const val NOTIFICATION_CHANNEL_ID_MISSED = "callkit_missed_channel_id"
 
+        @Volatile
+        private var sharedInstance: CallkitNotificationManager? = null
+
+        /**
+         * The process-wide notification manager, bound to the shared ringtone player.
+         *
+         * Each manager keeps its own avatar loaders, and a loader re-posts the ring
+         * notification when the picture arrives. With several managers in one process, a
+         * ring cancelled through one could be brought back by another's late avatar load.
+         */
+        fun shared(context: Context): CallkitNotificationManager =
+            sharedInstance ?: synchronized(this) {
+                sharedInstance ?: CallkitNotificationManager(
+                    context.applicationContext,
+                    CallkitSoundPlayerManager.shared(context)
+                ).also { sharedInstance = it }
+            }
+
     }
 
     private var dataNotificationPermission: Map<String, Any> = HashMap()

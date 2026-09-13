@@ -81,16 +81,12 @@ class CallkitIncomingBroadcastReceiver : BroadcastReceiver() {
             }
     }
 
-    private fun getCallkitNotificationManager(context: Context): CallkitNotificationManager {
-        FlutterCallkitIncomingPlugin.getInstance()
-            ?.getCallkitNotificationManager()
-            ?.let { return it }
+    private fun getCallkitNotificationManager(context: Context): CallkitNotificationManager =
+        CallkitNotificationManager.shared(context)
 
-        val appContext = context.applicationContext
-        val soundManager = FlutterCallkitIncomingPlugin.getInstance()?.getCallkitSoundPlayerManager()
-            ?: CallkitSoundPlayerManager(appContext)
-
-        return CallkitNotificationManager(appContext, soundManager)
+    private fun markTerminal(context: Context, data: Bundle, state: RingLedgerState.State) {
+        val callId = data.getString(CallkitConstants.EXTRA_CALLKIT_ID, "")
+        if (!callId.isNullOrEmpty()) RingLedger.markTerminal(context, callId, state)
     }
 
 
@@ -100,13 +96,8 @@ class CallkitIncomingBroadcastReceiver : BroadcastReceiver() {
         val data = intent.extras?.getBundle(CallkitConstants.EXTRA_CALLKIT_INCOMING_DATA) ?: return
         when (action) {
             "${context.packageName}.${CallkitConstants.ACTION_CALL_INCOMING}" -> {
-                try {
-                    getCallkitNotificationManager(context).showIncomingNotification(data)
-                    sendEventFlutter(CallkitConstants.ACTION_CALL_INCOMING, data)
-                    addCall(context, Data.fromBundle(data))
-                } catch (error: Exception) {
-                    Log.e(TAG, null, error)
-                }
+                // The presenter shows it (or refuses a duplicate) and handles its own errors.
+                CallkitIncomingPresenter.show(context, data, "broadcast")
             }
 
             "${context.packageName}.${CallkitConstants.ACTION_CALL_START}" -> {
@@ -125,6 +116,7 @@ class CallkitIncomingBroadcastReceiver : BroadcastReceiver() {
 
             "${context.packageName}.${CallkitConstants.ACTION_CALL_ACCEPT}" -> {
                 try {
+                    markTerminal(context, data, RingLedgerState.State.ACCEPTED)
                     FlutterCallkitIncomingPlugin.notifyEventCallbacks(CallkitEventCallback.CallEvent.ACCEPT, data)
                     getCallkitNotificationManager(context).clearIncomingNotification(data, true)
                     CallkitNotificationService.startServiceWithAction(
@@ -142,6 +134,7 @@ class CallkitIncomingBroadcastReceiver : BroadcastReceiver() {
             "${context.packageName}.${CallkitConstants.ACTION_CALL_DECLINE}" -> {
                 try {
                     // Log.d(TAG, "[CALLKIT] 📱 ACTION_CALL_DECLINE")           
+                    markTerminal(context, data, RingLedgerState.State.ENDED)
                     // Notify native decline callbacks
                     FlutterCallkitIncomingPlugin.notifyEventCallbacks(CallkitEventCallback.CallEvent.DECLINE, data)
                     // clear notification
@@ -157,6 +150,8 @@ class CallkitIncomingBroadcastReceiver : BroadcastReceiver() {
 
             "${context.packageName}.${CallkitConstants.ACTION_CALL_ENDED}" -> {
                 try {
+                    markTerminal(context, data, RingLedgerState.State.ENDED)
+                    FlutterCallkitIncomingPlugin.notifyEventCallbacks(CallkitEventCallback.CallEvent.ENDED, data)
                     // clear notification and stop service
                     getCallkitNotificationManager(context).clearIncomingNotification(data, false)
                     CallkitNotificationService.stopService(context)
@@ -171,6 +166,8 @@ class CallkitIncomingBroadcastReceiver : BroadcastReceiver() {
 
             "${context.packageName}.${CallkitConstants.ACTION_CALL_TIMEOUT}" -> {
                 try {
+                    markTerminal(context, data, RingLedgerState.State.ENDED)
+                    FlutterCallkitIncomingPlugin.notifyEventCallbacks(CallkitEventCallback.CallEvent.TIMEOUT, data)
                     // clear notification and show miss notification
                     val notificationManager = getCallkitNotificationManager(context)
                     notificationManager.clearIncomingNotification(data, false)
@@ -207,66 +204,6 @@ class CallkitIncomingBroadcastReceiver : BroadcastReceiver() {
         }
     }
 
-    private fun sendEventFlutter(event: String, data: Bundle) {
-        if (silenceEvents) return
-
-        val android = mapOf(
-            "isCustomNotification" to data.getBoolean(
-                CallkitConstants.EXTRA_CALLKIT_IS_CUSTOM_NOTIFICATION,
-                false
-            ),
-            "isCustomSmallExNotification" to data.getBoolean(
-                CallkitConstants.EXTRA_CALLKIT_IS_CUSTOM_SMALL_EX_NOTIFICATION,
-                false
-            ),
-            "ringtonePath" to data.getString(CallkitConstants.EXTRA_CALLKIT_RINGTONE_PATH, ""),
-            "backgroundColor" to data.getString(
-                CallkitConstants.EXTRA_CALLKIT_BACKGROUND_COLOR,
-                ""
-            ),
-            "backgroundUrl" to data.getString(CallkitConstants.EXTRA_CALLKIT_BACKGROUND_URL, ""),
-            "actionColor" to data.getString(CallkitConstants.EXTRA_CALLKIT_ACTION_COLOR, ""),
-            "textColor" to data.getString(CallkitConstants.EXTRA_CALLKIT_TEXT_COLOR, ""),
-            "incomingCallNotificationChannelName" to data.getString(
-                CallkitConstants.EXTRA_CALLKIT_INCOMING_CALL_NOTIFICATION_CHANNEL_NAME,
-                ""
-            ),
-            "missedCallNotificationChannelName" to data.getString(
-                CallkitConstants.EXTRA_CALLKIT_MISSED_CALL_NOTIFICATION_CHANNEL_NAME,
-                ""
-            ),
-            "isImportant" to data.getBoolean(CallkitConstants.EXTRA_CALLKIT_IS_IMPORTANT, true),
-            "isBot" to data.getBoolean(CallkitConstants.EXTRA_CALLKIT_IS_BOT, false),
-        )
-        val missedCallNotification = mapOf(
-            "id" to data.getInt(CallkitConstants.EXTRA_CALLKIT_MISSED_CALL_ID),
-            "showNotification" to data.getBoolean(CallkitConstants.EXTRA_CALLKIT_MISSED_CALL_SHOW),
-            "count" to data.getInt(CallkitConstants.EXTRA_CALLKIT_MISSED_CALL_COUNT),
-            "subtitle" to data.getString(CallkitConstants.EXTRA_CALLKIT_MISSED_CALL_SUBTITLE),
-            "callbackText" to data.getString(CallkitConstants.EXTRA_CALLKIT_MISSED_CALL_CALLBACK_TEXT),
-            "isShowCallback" to data.getBoolean(CallkitConstants.EXTRA_CALLKIT_MISSED_CALL_CALLBACK_SHOW),
-        )
-        val callingNotification = mapOf(
-            "id" to data.getString(CallkitConstants.EXTRA_CALLKIT_CALLING_ID),
-            "showNotification" to data.getBoolean(CallkitConstants.EXTRA_CALLKIT_CALLING_SHOW),
-            "subtitle" to data.getString(CallkitConstants.EXTRA_CALLKIT_CALLING_SUBTITLE),
-            "callbackText" to data.getString(CallkitConstants.EXTRA_CALLKIT_CALLING_HANG_UP_TEXT),
-            "isShowCallback" to data.getBoolean(CallkitConstants.EXTRA_CALLKIT_CALLING_HANG_UP_SHOW),
-        )
-        val forwardData = mapOf(
-            "id" to data.getString(CallkitConstants.EXTRA_CALLKIT_ID, ""),
-            "nameCaller" to data.getString(CallkitConstants.EXTRA_CALLKIT_NAME_CALLER, ""),
-            "avatar" to data.getString(CallkitConstants.EXTRA_CALLKIT_AVATAR, ""),
-            "number" to data.getString(CallkitConstants.EXTRA_CALLKIT_HANDLE, ""),
-            "type" to data.getInt(CallkitConstants.EXTRA_CALLKIT_TYPE, 0),
-            "duration" to data.getLong(CallkitConstants.EXTRA_CALLKIT_DURATION, 0L),
-            "textAccept" to data.getString(CallkitConstants.EXTRA_CALLKIT_TEXT_ACCEPT, ""),
-            "textDecline" to data.getString(CallkitConstants.EXTRA_CALLKIT_TEXT_DECLINE, ""),
-            "extra" to data.getSerializable(CallkitConstants.EXTRA_CALLKIT_EXTRA),
-            "missedCallNotification" to missedCallNotification,
-            "callingNotification" to callingNotification,
-            "android" to android
-        )
-        FlutterCallkitIncomingPlugin.sendEvent(event, forwardData)
-    }
+    private fun sendEventFlutter(event: String, data: Bundle) =
+        CallkitEventForwarder.send(event, data)
 }

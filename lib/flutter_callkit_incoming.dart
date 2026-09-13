@@ -145,6 +145,35 @@ class FlutterCallkitIncoming {
     return await _channel.invokeMethod("canUseFullScreenIntent");
   }
 
+  /// Take the right to ring call [id] before showing it.
+  ///
+  /// Returns `claimed` (go ahead), `duplicate` (another path on this device already
+  /// has it) or `ended` (already accepted, ended or cancelled here). Only Android keeps
+  /// a ring ledger; everywhere else, and on any failure, this fails open to `claimed`.
+  static Future<String> claimIncoming(String id, {String source = 'dart'}) async {
+    try {
+      final result = await _channel
+          .invokeMethod<String>("claimIncoming", {'id': id, 'source': source});
+      return result ?? 'claimed';
+    } on MissingPluginException {
+      return 'claimed';
+    }
+  }
+
+  /// Take down the ring for call [id] because it was cancelled elsewhere: answered on
+  /// another device, or the caller hung up. Unlike [endCall], no decline event is
+  /// sent. A ring that arrives after this is refused. Only Android: returns false
+  /// elsewhere, and whenever no ring was showing.
+  static Future<bool> dismissIncoming(String id) async {
+    try {
+      final result =
+          await _channel.invokeMethod<bool>("dismissIncoming", {'id': id});
+      return result ?? false;
+    } on MissingPluginException {
+      return false;
+    }
+  }
+
   static CallEvent? _receiveCallEvent(dynamic data) {
     Event? event;
     Map<String, dynamic> body = {};

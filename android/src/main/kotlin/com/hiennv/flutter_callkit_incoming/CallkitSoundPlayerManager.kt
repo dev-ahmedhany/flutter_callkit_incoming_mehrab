@@ -14,6 +14,25 @@ import android.text.TextUtils
 
 class CallkitSoundPlayerManager(private val context: Context) {
 
+    companion object {
+        @Volatile
+        private var sharedInstance: CallkitSoundPlayerManager? = null
+
+        /**
+         * The process-wide ringtone player.
+         *
+         * The receiver used to build a throwaway player whenever no Flutter engine had
+         * attached the plugin. A ring started by one of those could not be stopped by the
+         * accept, decline or timeout that went through a different player — and on
+         * API 28+ it loops.
+         */
+        fun shared(context: Context): CallkitSoundPlayerManager =
+            sharedInstance ?: synchronized(this) {
+                sharedInstance ?: CallkitSoundPlayerManager(context.applicationContext)
+                    .also { sharedInstance = it }
+            }
+    }
+
     private var vibrator: Vibrator? = null
     private var audioManager: AudioManager? = null
 
