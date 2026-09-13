@@ -179,8 +179,13 @@ class FlutterCallkitIncoming {
     Map<String, dynamic> body = {};
 
     if (data is Map) {
-      event = Event.values.firstWhere((e) => e.name == data['event']);
-      body = Map<String, dynamic>.from(data['body']);
+      event = Event.values.firstWhere(
+        (e) => e.name == data['event'],
+        // A native event this side doesn't know reaches listeners as custom
+        // instead of throwing inside the event stream.
+        orElse: () => Event.actionCallCustom,
+      );
+      body = Map<String, dynamic>.from(data['body'] as Map? ?? const {});
       return CallEvent(body, event);
     }
     return null;

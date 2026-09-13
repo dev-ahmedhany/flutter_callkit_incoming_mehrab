@@ -7,53 +7,53 @@
 
 import Foundation
 import AVFoundation
+import CallKit
 
 public class Call: NSObject {
-    
+
     public var uuid: UUID
     public var data: Data
     public var isOutGoing: Bool
-    
+
     public var handle: String?
-    
+
+    /// Answered in CallKit: the answer action ran for this call.
+    public var answered = false
+
     var stateDidChange: (() -> Void)?
     var hasStartedConnectDidChange: (() -> Void)?
     var hasConnectDidChange: (() -> Void)?
     var hasEndedDidChange: (() -> Void)?
-    
+
     var connectData: Date?{
         didSet{
             stateDidChange?()
             hasStartedConnectDidChange?()
         }
     }
-    
+
     var connectedData: Date?{
         didSet{
             stateDidChange?()
             hasConnectDidChange?()
         }
     }
-    
+
     var endDate: Date?{
         didSet{
             stateDidChange?()
             hasEndedDidChange?()
         }
     }
-    
+
     var isOnHold = false{
         didSet{
             stateDidChange?()
         }
     }
-    
-    var isMuted = false{
-        didSet{
-            
-        }
-    }
-    
+
+    var isMuted = false
+
     var hasStartedConnecting: Bool{
         get{
             return connectData != nil
@@ -62,7 +62,7 @@ public class Call: NSObject {
             connectData = newValue ? Date() : nil
         }
     }
-    
+
     var hasConnected: Bool {
         get{
             return connectedData != nil
@@ -71,7 +71,7 @@ public class Call: NSObject {
             connectedData = newValue ? Date() : nil
         }
     }
-    
+
     var hasEnded: Bool {
         get{
             return endDate != nil
@@ -80,50 +80,23 @@ public class Call: NSObject {
             endDate = newValue ? Date() : nil
         }
     }
-    
+
     var duration: TimeInterval {
         guard let connectDate = connectedData else {
             return 0
         }
         return Date().timeIntervalSince(connectDate)
     }
-    
+
     init(uuid: UUID, data: Data, isOutGoing: Bool = false){
         self.uuid = uuid
         self.data = data
         self.isOutGoing = isOutGoing
     }
-    
-    var startCallCompletion: ((Bool) -> Void)?
-    
-    func startCall(withAudioSession audioSession: AVAudioSession ,completion :((_ success : Bool)->Void)?){
-        startCallCompletion = completion
-        hasStartedConnecting = true
-    }
-    
-    var answCallCompletion :((Bool) -> Void)?
-    
-    func ansCall(withAudioSession audioSession: AVAudioSession ,completion :((_ success : Bool)->Void)?){
-        answCallCompletion = completion
-        hasStartedConnecting = true
-    }
-    
-    var connectedCallCompletion: ((Bool) -> Void)?
-    
-    func connectedCall(completion :((_ success : Bool)->Void)?){
-        connectedCallCompletion = completion
-        hasConnected = true
-    }
-    
+
     func endCall(){
         hasEnded = true
     }
-    
-    func startAudio() {
-        
-    }
-    
-    
 }
 
 @objc public class Data: NSObject {
@@ -137,7 +110,7 @@ public class Call: NSObject {
     @objc public var duration: Int
     @objc public var isAccepted: Bool
     @objc public var extra: NSDictionary
-    
+
     //iOS
     @objc public var iconName: String
     @objc public var handleType: String
@@ -155,15 +128,15 @@ public class Call: NSObject {
     @objc public var audioSessionActive: Bool
     @objc public var audioSessionPreferredSampleRate: Double
     @objc public var audioSessionPreferredIOBufferDuration: Double
-    
+
     //missedCallNotification
     @objc public var isShowMissedCallNotification: Bool = true
     @objc public var missedNotificationSubtitle: String
-    
+
     @objc public var missedNotificationCallbackText: String
     @objc public var isShowCallback: Bool = true
-    
-    
+
+
     @objc public init(id: String, nameCaller: String, handle: String, type: Int) {
         self.uuid = id
         self.nameCaller = nameCaller
@@ -191,13 +164,13 @@ public class Call: NSObject {
         self.audioSessionActive = true
         self.audioSessionPreferredSampleRate = 44100.0
         self.audioSessionPreferredIOBufferDuration = 0.005
-        
+
         self.isShowMissedCallNotification = true
         self.missedNotificationSubtitle = "Missed Call"
         self.missedNotificationCallbackText = "Call back"
         self.isShowCallback = true
     }
-    
+
     @objc public convenience init(args: NSDictionary) {
         var argsConvert = [String: Any?]()
         for (key, value) in args {
@@ -205,7 +178,7 @@ public class Call: NSObject {
         }
         self.init(args: argsConvert)
     }
-    
+
     public init(args: [String: Any?]) {
         self.uuid = args["id"] as? String ?? ""
         self.nameCaller = args["nameCaller"] as? String ?? ""
@@ -217,8 +190,8 @@ public class Call: NSObject {
         self.duration = args["duration"] as? Int ?? 30000
         self.isAccepted = args["isAccepted"] as? Bool ?? false
         self.extra = args["extra"] as? NSDictionary ?? [:]
-        
-        
+
+
         if let ios = args["ios"] as? [String: Any] {
             self.iconName = ios["iconName"] as? String ?? "CallKitLogo"
             self.handleType = ios["handleType"] as? String ?? ""
@@ -266,7 +239,7 @@ public class Call: NSObject {
             self.isShowCallback = true
         }
     }
-    
+
     open func toJSON() -> [String: Any] {
         let missedCallNotification: [String : Any] = [
             "showNotification": isShowMissedCallNotification,
@@ -309,7 +282,7 @@ public class Call: NSObject {
         ]
         return map
     }
-    
+
     func getEncryptHandle() -> String {
         if (normalHandle > 0) {
             return handle
@@ -319,18 +292,18 @@ public class Call: NSObject {
 
             map["nameCaller"] = nameCaller
             map["handle"] = handle
-            
+
             let mapExtras = extra as? [String: Any]
-            
+
             if (mapExtras == nil) {
                 print("error casting dictionary to [String: Any]")
                 return String(format: "{\"nameCaller\":\"%@\", \"handle\":\"%@\"}", nameCaller, handle).encryptHandle()
             }
-            
+
             for (key, value) in mapExtras! {
                 map[key] = value
             }
-            
+
             let mapData = try JSONSerialization.data(withJSONObject: map, options: .prettyPrinted)
 
             let mapString: String = String(data: mapData, encoding: .utf8) ?? ""
@@ -340,8 +313,18 @@ public class Call: NSObject {
             print("error encrypting call data")
             return String(format: "{\"nameCaller\":\"%@\", \"handle\":\"%@\"}", nameCaller, handle).encryptHandle()
         }
-       
+
     }
-    
-    
+
+    /// The CallKit handle type for `handleType`.
+    var cxHandleType: CXHandle.HandleType {
+        switch handleType {
+        case "number":
+            return .phoneNumber
+        case "email":
+            return .emailAddress
+        default:
+            return .generic
+        }
+    }
 }
