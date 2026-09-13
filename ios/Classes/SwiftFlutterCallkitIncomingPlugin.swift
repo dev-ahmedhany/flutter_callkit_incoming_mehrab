@@ -201,7 +201,7 @@ public class SwiftFlutterCallkitIncomingPlugin: NSObject, FlutterPlugin, CXProvi
                 result(false)
                 return
             }
-            self.endCall(Data(args: args)) { result($0) }
+            self.endCall(Data(args: args), reason: args["reason"] as? Int) { result($0) }
             break
         case "muteCall":
             guard let args = call.arguments as? [String: Any] ,
@@ -468,18 +468,60 @@ public class SwiftFlutterCallkitIncomingPlugin: NSObject, FlutterPlugin, CXProvi
     }
 
     @objc public func endCall(_ data: Data) {
-        endCall(data, completion: nil)
+        endCall(data, reason: nil, completion: nil)
     }
 
-    /// The end action reports the end to Dart once CallKit performs it.
     public func endCall(_ data: Data, completion: ((Bool) -> Void)?) {
+        endCall(data, reason: nil, completion: completion)
+    }
+
+    /// Without a `reason` this user hangs up, and the end action reports the end to Dart once
+    /// CallKit performs it. With one (1 failed, 2 remote ended, 3 unanswered, 4 answered
+    /// elsewhere, 5 declined elsewhere) the call ended away from this device: CallKit is told
+    /// why, and Dart, which ended it, hears nothing back.
+    public func endCall(_ data: Data, reason: Int?, completion: ((Bool) -> Void)?) {
         // Guard against malformed UUID — see CallManager.swift:startCall for rationale.
         guard let uuid = UUID(uuidString: data.uuid) else {
             report("info", "end_call", "invalid UUID '\(data.uuid)'", callId: data.uuid)
             completion?(false)
             return
         }
-        self.callManager.endCall(uuid: uuid, completion: completion)
+        guard let code = reason, let endedReason = SwiftFlutterCallkitIncomingPlugin.endedReason(code) else {
+            self.callManager.endCall(uuid: uuid, completion: completion)
+            return
+        }
+        failPendingAnswer(uuid)
+        self.sharedProvider?.reportCall(with: uuid, endedAt: Date(), reason: endedReason)
+        if let call = self.callManager.callWithUUID(uuid: uuid) {
+            call.endCall()
+            self.callManager.removeCall(call)
+        }
+        completion?(true)
+    }
+
+    private static func endedReason(_ code: Int) -> CXCallEndedReason? {
+        switch code {
+        case 1: return .failed
+        case 2: return .remoteEnded
+        case 3: return .unanswered
+        case 4: return .answeredElsewhere
+        case 5: return .declinedElsewhere
+        default: return nil
+        }
+    }
+
+    /// Answers held back until the app's media connects (`connectedCall`), for calls whose
+    /// audio the app leaves to CallKit. CallKit activates the audio session only once the
+    /// answer is fulfilled, so until then the call reads "connecting", not a silent
+    /// "connected".
+    private var pendingAnswers: [UUID: CXAnswerCallAction] = [:]
+
+    private func fulfillPendingAnswer(_ uuid: UUID) {
+        pendingAnswers.removeValue(forKey: uuid)?.fulfill()
+    }
+
+    private func failPendingAnswer(_ uuid: UUID) {
+        pendingAnswers.removeValue(forKey: uuid)?.fail()
     }
 
     @objc public func connectedCall(_ data: Data) {
@@ -493,6 +535,7 @@ public class SwiftFlutterCallkitIncomingPlugin: NSObject, FlutterPlugin, CXProvi
             completion?(false)
             return
         }
+        fulfillPendingAnswer(uuid)
         self.callManager.connectedCall(uuid: uuid, completion: completion)
     }
 
@@ -668,6 +711,8 @@ public class SwiftFlutterCallkitIncomingPlugin: NSObject, FlutterPlugin, CXProvi
 
     /// CallKit dropped every call (e.g. its daemon restarted): each ends for the app too.
     public func providerDidReset(_ provider: CXProvider) {
+        pendingAnswers.removeAll()
+        pendingMutes.removeAll()
         report("error", "provider_reset", "CallKit reset the provider with \(callManager.calls.count) call(s)")
         for call in self.callManager.calls {
             call.endCall()
@@ -719,7 +764,14 @@ public class SwiftFlutterCallkitIncomingPlugin: NSObject, FlutterPlugin, CXProvi
         sendEvent(SwiftFlutterCallkitIncomingPlugin.ACTION_CALL_ACCEPT, call.data.toJSON())
         if let appDelegate = UIApplication.shared.delegate as? CallkitIncomingAppDelegate {
             appDelegate.onAccept(call, action)
-        }else {
+        } else if !call.data.configureAudioSession {
+            let uuid = action.callUUID
+            pendingAnswers[uuid] = action
+            // Never longer than this: a slow network still answers.
+            DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(5)) { [weak self] in
+                self?.fulfillPendingAnswer(uuid)
+            }
+        } else {
             action.fulfill()
         }
     }
@@ -732,6 +784,7 @@ public class SwiftFlutterCallkitIncomingPlugin: NSObject, FlutterPlugin, CXProvi
             action.fulfill()
             return
         }
+        failPendingAnswer(action.callUUID)
         call.endCall()
         self.callManager.removeCall(call)
         // Decline or hang-up is this call's own state, not whichever call came last.
