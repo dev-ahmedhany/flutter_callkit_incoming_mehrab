@@ -48,6 +48,11 @@ public class SwiftFlutterCallkitIncomingPlugin: NSObject, FlutterPlugin, CXProvi
     /// queue.
     public static var audioSessionObserver: ((CallAudioEvent) -> Void)?
 
+    /// A ring iOS refused to show (Focus/Do Not Disturb, a blocked caller, not entitled), with
+    /// the call's data and CallKit's error, so the app can tell whoever is waiting on it. Never
+    /// for the same call reported twice (socket and VoIP push).
+    public static var incomingCallRefusedObserver: ((Data, Error) -> Void)?
+
     private var streamHandlers: WeakArray<EventCallbackHandler> = WeakArray([])
 
     private var callManager: CallManager
@@ -374,6 +379,9 @@ public class SwiftFlutterCallkitIncomingPlugin: NSObject, FlutterPlugin, CXProvi
                 // (Do Not Disturb, blocked, too many calls) is a ring the user never saw.
                 let duplicate = (error as? CXErrorCodeIncomingCallError)?.code == .callUUIDAlreadyExists
                 self.report(duplicate ? "info" : "error", "report_incoming", "\(error.localizedDescription) (\((error as NSError).code))", callId: data.uuid)
+                if !duplicate {
+                    SwiftFlutterCallkitIncomingPlugin.incomingCallRefusedObserver?(data, error)
+                }
             } else {
                 // A ring beside a live call must not take the audio away from it.
                 if self.audioCall() == nil {
