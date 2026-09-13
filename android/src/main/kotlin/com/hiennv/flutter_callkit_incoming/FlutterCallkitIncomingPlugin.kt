@@ -139,9 +139,7 @@ class FlutterCallkitIncomingPlugin : FlutterPlugin, MethodCallHandler, ActivityA
 
     override fun onAttachedToEngine(flutterPluginBinding: FlutterPlugin.FlutterPluginBinding) {
         sharePluginWithRegister(flutterPluginBinding)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            InAppCallManager(flutterPluginBinding.applicationContext).registerPhoneAccount()
-        }
+        LegacyPhoneAccount.removeOnce(flutterPluginBinding.applicationContext)
     }
 
     public fun showIncomingNotification(data: Data) {
