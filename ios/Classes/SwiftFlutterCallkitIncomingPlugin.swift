@@ -4,6 +4,19 @@ import CallKit
 import AVFoundation
 import UserNotifications
 
+/// CallKit's audio session, as `SwiftFlutterCallkitIncomingPlugin.audioSessionObserver` sees it.
+public enum CallAudioEvent {
+    /// A call is being reported or started while no other call holds the audio. CallKit
+    /// activates the session only once the call is answered or placed.
+    case callStarting
+    /// CallKit activated the session: answer, start, resume.
+    case activated
+    /// CallKit deactivated the session: hold, end.
+    case deactivated
+    /// The last call is gone.
+    case noCalls
+}
+
 @available(iOS 10.0, *)
 public class SwiftFlutterCallkitIncomingPlugin: NSObject, FlutterPlugin, CXProviderDelegate {
 
@@ -30,6 +43,11 @@ public class SwiftFlutterCallkitIncomingPlugin: NSObject, FlutterPlugin, CXProvi
 
     @objc public private(set) static var sharedInstance: SwiftFlutterCallkitIncomingPlugin!
 
+    /// For an app that runs its own audio engine only while CallKit has activated the session
+    /// (e.g. LiveKit's engine availability under an external call system). Called on the main
+    /// queue.
+    public static var audioSessionObserver: ((CallAudioEvent) -> Void)?
+
     private var streamHandlers: WeakArray<EventCallbackHandler> = WeakArray([])
 
     private var callManager: CallManager
@@ -39,6 +57,7 @@ public class SwiftFlutterCallkitIncomingPlugin: NSObject, FlutterPlugin, CXProvi
     private var silenceEvents: Bool = false
     private let devicePushTokenVoIP = "DevicePushTokenVoIP"
     private var pendingReports = [[String: Any]]()
+    private var hadCalls = false
 
 
     private func sendEvent(_ event: String, _ body: [String : Any?]?) {
@@ -127,6 +146,14 @@ public class SwiftFlutterCallkitIncomingPlugin: NSObject, FlutterPlugin, CXProvi
         super.init()
         callManager.reporter = { [weak self] type, op, detail, callId in
             self?.report(type, op, detail, callId: callId)
+        }
+        callManager.callsChangedHandler = { [weak self] in
+            guard let self = self else { return }
+            let hasCalls = !self.callManager.calls.isEmpty
+            if self.hadCalls && !hasCalls {
+                SwiftFlutterCallkitIncomingPlugin.audioSessionObserver?(.noCalls)
+            }
+            self.hadCalls = hasCalls
         }
     }
 
@@ -336,6 +363,10 @@ public class SwiftFlutterCallkitIncomingPlugin: NSObject, FlutterPlugin, CXProvi
                 let duplicate = (error as? CXErrorCodeIncomingCallError)?.code == .callUUIDAlreadyExists
                 self.report(duplicate ? "info" : "error", "report_incoming", "\(error.localizedDescription) (\((error as NSError).code))", callId: data.uuid)
             } else {
+                // A ring beside a live call must not take the audio away from it.
+                if self.audioCall() == nil {
+                    SwiftFlutterCallkitIncomingPlugin.audioSessionObserver?(.callStarting)
+                }
                 self.configureAudioSession(data)
                 let call = Call(uuid: uuid, data: data)
                 call.handle = data.handle
@@ -621,6 +652,9 @@ public class SwiftFlutterCallkitIncomingPlugin: NSObject, FlutterPlugin, CXProvi
             guard let call = call else { return }
             self?.sharedProvider?.reportOutgoingCall(with: call.uuid, connectedAt: call.connectedData)
         }
+        if audioCall() == nil {
+            SwiftFlutterCallkitIncomingPlugin.audioSessionObserver?(.callStarting)
+        }
         self.callManager.addCall(call)
         self.sendEvent(SwiftFlutterCallkitIncomingPlugin.ACTION_CALL_START, call.data.toJSON())
         action.fulfill()
@@ -745,9 +779,14 @@ public class SwiftFlutterCallkitIncomingPlugin: NSObject, FlutterPlugin, CXProvi
         if let appDelegate = UIApplication.shared.delegate as? CallkitIncomingAppDelegate {
             appDelegate.didActivateAudioSession(audioSession)
         }
+        SwiftFlutterCallkitIncomingPlugin.audioSessionObserver?(.activated)
 
         let call = audioCall()
-        sendDefaultAudioInterruptionNotificationToStartAudioResource()
+        // The nudge that restarts WebRTC's audio after CallKit activates, for an app that
+        // leaves the session to this plugin. An app owning its audio engine starts it itself.
+        if call?.data.configureAudioSession ?? true {
+            sendDefaultAudioInterruptionNotificationToStartAudioResource()
+        }
         if call?.hasConnected != true {
             configureAudioSession(call?.data)
         }
@@ -765,6 +804,10 @@ public class SwiftFlutterCallkitIncomingPlugin: NSObject, FlutterPlugin, CXProvi
         }
 
         let call = audioCall()
+        // A call still up is on hold. With none left the session closed after an end, which
+        // CallKit reports after the call is removed: "no calls" again, never a late
+        // "deactivated" that would leave the app's engine switched off.
+        SwiftFlutterCallkitIncomingPlugin.audioSessionObserver?(call == nil ? .noCalls : .deactivated)
         self.sendEvent(SwiftFlutterCallkitIncomingPlugin.ACTION_CALL_TOGGLE_AUDIO_SESSION, [
             "id": call?.data.uuid ?? "",
             "isActivate": false,
