@@ -268,6 +268,11 @@ class FlutterCallkitIncomingPlugin : FlutterPlugin, MethodCallHandler, ActivityA
                     result.success(true)
                 }
 
+                "updateCall" -> {
+                    // CallKit only: nothing on Android shows a call's hold or video support.
+                    result.success(true)
+                }
+
                 "holdCall" -> {
                     val map = buildMap {
                         val args = call.arguments

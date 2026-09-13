@@ -66,7 +66,7 @@ class FlutterCallkitIncoming {
   /// On iOS, using Callkit(update the ongoing call ui).
   /// On Android, Nothing(only callback event listener).
   static Future muteCall(String id, {bool isMuted = true}) async {
-    await _channel.invokeMethod("muteCall", {'id': id, 'isMuted': isMuted});
+    return await _channel.invokeMethod("muteCall", {'id': id, 'isMuted': isMuted});
   }
 
   /// Get Callkit Mic Status (muted/unmuted).
@@ -81,7 +81,17 @@ class FlutterCallkitIncoming {
   /// On iOS, using Callkit(update the ongoing call ui).
   /// On Android, Nothing(only callback event listener).
   static Future holdCall(String id, {bool isOnHold = true}) async {
-    await _channel.invokeMethod("holdCall", {'id': id, 'isOnHold': isOnHold});
+    return await _channel.invokeMethod("holdCall", {'id': id, 'isOnHold': isOnHold});
+  }
+
+  /// Change what the system call UI shows for a live call; only the values
+  /// given change. On iOS, using Callkit(update call ui). A no-op on Android.
+  static Future updateCall(String id, {bool? hasVideo, bool? supportsHolding}) async {
+    return await _channel.invokeMethod("updateCall", {
+      'id': id,
+      if (hasVideo != null) 'hasVideo': hasVideo,
+      if (supportsHolding != null) 'supportsHolding': supportsHolding,
+    });
   }
 
   /// End an Incoming/Outgoing call.

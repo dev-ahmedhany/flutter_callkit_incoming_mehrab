@@ -234,6 +234,18 @@ public class SwiftFlutterCallkitIncomingPlugin: NSObject, FlutterPlugin, CXProvi
             }
             self.holdCall(callId, onHold: onHold) { result($0) }
             break
+        case "updateCall":
+            guard let args = call.arguments as? [String: Any],
+                  let callId = args["id"] as? String else {
+                result(false)
+                return
+            }
+            result(self.updateCall(
+                callId,
+                hasVideo: args["hasVideo"] as? Bool,
+                supportsHolding: args["supportsHolding"] as? Bool
+            ))
+            break
         case "callConnected":
             // Always the call Dart names, as for endCall.
             guard let args = call.arguments as? [String: Any] else {
@@ -393,6 +405,10 @@ public class SwiftFlutterCallkitIncomingPlugin: NSObject, FlutterPlugin, CXProvi
         muteCall(callId, isMuted: isMuted, completion: nil)
     }
 
+    /// Mutes the app asked for, by call, until CallKit performs them: the app already knows
+    /// those, and an echo would read as the user tapping CallKit's own button.
+    private var pendingMutes: [UUID: Bool] = [:]
+
     public func muteCall(_ callId: String, isMuted: Bool, completion: ((Bool) -> Void)?) {
         guard let uuid = UUID(uuidString: callId),
               let call = self.callManager.callWithUUID(uuid: uuid) else {
@@ -400,10 +416,13 @@ public class SwiftFlutterCallkitIncomingPlugin: NSObject, FlutterPlugin, CXProvi
             return
         }
         if call.isMuted == isMuted {
-            self.sendMuteEvent(call.data.uuid, isMuted)
             completion?(true)
-        } else {
-            self.callManager.muteCall(call: call, isMuted: isMuted, completion: completion)
+            return
+        }
+        pendingMutes[uuid] = isMuted
+        self.callManager.muteCall(call: call, isMuted: isMuted) { [weak self] ok in
+            if !ok { self?.pendingMutes.removeValue(forKey: uuid) }
+            completion?(ok)
         }
     }
 
@@ -425,6 +444,27 @@ public class SwiftFlutterCallkitIncomingPlugin: NSObject, FlutterPlugin, CXProvi
         } else {
             self.callManager.holdCall(call: call, onHold: onHold, completion: completion)
         }
+    }
+
+    /// Changes what CallKit shows for a live call; only the values given change. False when
+    /// there is no such call.
+    @discardableResult
+    public func updateCall(_ callId: String, hasVideo: Bool?, supportsHolding: Bool?) -> Bool {
+        guard let uuid = UUID(uuidString: callId),
+              let call = self.callManager.callWithUUID(uuid: uuid) else {
+            report("info", "update_call", "no such call", callId: callId)
+            return false
+        }
+        let update = CXCallUpdate()
+        if let hasVideo = hasVideo {
+            update.hasVideo = hasVideo
+        }
+        if let supportsHolding = supportsHolding {
+            update.supportsHolding = supportsHolding
+            call.data.supportsHolding = supportsHolding
+        }
+        self.sharedProvider?.reportCall(with: uuid, updated: update)
+        return true
     }
 
     @objc public func endCall(_ data: Data) {
@@ -732,7 +772,11 @@ public class SwiftFlutterCallkitIncomingPlugin: NSObject, FlutterPlugin, CXProvi
             return
         }
         call.isMuted = action.isMuted
-        sendMuteEvent(call.data.uuid, action.isMuted)
+        if pendingMutes[action.callUUID] == action.isMuted {
+            pendingMutes.removeValue(forKey: action.callUUID)
+        } else {
+            sendMuteEvent(call.data.uuid, action.isMuted)
+        }
         action.fulfill()
     }
 
