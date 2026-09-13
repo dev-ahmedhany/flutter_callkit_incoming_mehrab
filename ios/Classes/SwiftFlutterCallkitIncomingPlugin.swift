@@ -37,7 +37,6 @@ public class SwiftFlutterCallkitIncomingPlugin: NSObject, FlutterPlugin, CXProvi
     private var answerCall : Call?
     
     private var data: Data?
-    private var isFromPushKit: Bool = false
     private var silenceEvents: Bool = false
     private let devicePushTokenVoIP = "DevicePushTokenVoIP"
 
@@ -155,17 +154,11 @@ public class SwiftFlutterCallkitIncomingPlugin: NSObject, FlutterPlugin, CXProvi
             result(true)
             break
         case "endCall":
-            guard let args = call.arguments else {
-                result(true)
-                return
-            }
-            if(self.isFromPushKit){
+            // Always the call Dart names. After a VoIP push this used to end the pushed call
+            // whatever id was passed, so clearing a stale entry killed the ringing call.
+            if let args = call.arguments as? [String: Any] {
+                self.data = Data(args: args)
                 self.endCall(self.data!)
-            }else{
-                if let getArgs = args as? [String: Any] {
-                    self.data = Data(args: getArgs)
-                    self.endCall(self.data!)
-                }
             }
             result(true)
             break
@@ -204,17 +197,10 @@ public class SwiftFlutterCallkitIncomingPlugin: NSObject, FlutterPlugin, CXProvi
             result(true)
             break
         case "callConnected":
-            guard let args = call.arguments else {
-                result(true)
-                return
-            }
-            if(self.isFromPushKit){
+            // Always the call Dart names, as for endCall.
+            if let args = call.arguments as? [String: Any] {
+                self.data = Data(args: args)
                 self.connectedCall(self.data!)
-            }else{
-                if let getArgs = args as? [String: Any] {
-                    self.data = Data(args: getArgs)
-                    self.connectedCall(self.data!)
-                }
             }
             result(true)
             break
@@ -285,7 +271,6 @@ public class SwiftFlutterCallkitIncomingPlugin: NSObject, FlutterPlugin, CXProvi
     }
     
     @objc public func showCallkitIncoming(_ data: Data, fromPushKit: Bool) {
-        self.isFromPushKit = fromPushKit
         if(fromPushKit){
             self.data = data
         }
@@ -334,7 +319,6 @@ public class SwiftFlutterCallkitIncomingPlugin: NSObject, FlutterPlugin, CXProvi
     }
 
     @objc public func showCallkitIncoming(_ data: Data, fromPushKit: Bool, completion: @escaping () -> Void) {
-        self.isFromPushKit = fromPushKit
         if(fromPushKit){
             self.data = data
         }
@@ -381,7 +365,6 @@ public class SwiftFlutterCallkitIncomingPlugin: NSObject, FlutterPlugin, CXProvi
     
     
     @objc public func startCall(_ data: Data, fromPushKit: Bool) {
-        self.isFromPushKit = fromPushKit
         if(fromPushKit){
             self.data = data
         }
@@ -415,22 +398,9 @@ public class SwiftFlutterCallkitIncomingPlugin: NSObject, FlutterPlugin, CXProvi
     
     @objc public func endCall(_ data: Data) {
         // Guard against malformed UUID — see CallManager.swift:startCall for rationale.
-        // PushKit branch reads uuid from self.data (stored during showCallkitIncoming);
-        // non-PushKit reads from the incoming data. Either source can be invalid.
-        let uuidSourceString: String
-        if self.isFromPushKit {
-            guard let stored = self.data else {
-                NSLog("[CallkitIncoming] endCall: PushKit branch but self.data is nil — ignored")
-                return
-            }
-            uuidSourceString = stored.uuid
-            self.isFromPushKit = false
-            self.sendEvent(SwiftFlutterCallkitIncomingPlugin.ACTION_CALL_ENDED, data.toJSON())
-        } else {
-            uuidSourceString = data.uuid
-        }
-        guard let uuid = UUID(uuidString: uuidSourceString) else {
-            NSLog("[CallkitIncoming] endCall: invalid UUID '\(uuidSourceString)' — ignored")
+        // The end action reports the end to Dart once CallKit performs it.
+        guard let uuid = UUID(uuidString: data.uuid) else {
+            NSLog("[CallkitIncoming] endCall: invalid UUID '\(data.uuid)' — ignored")
             return
         }
         let call = Call(uuid: uuid, data: data)
@@ -439,19 +409,8 @@ public class SwiftFlutterCallkitIncomingPlugin: NSObject, FlutterPlugin, CXProvi
 
     @objc public func connectedCall(_ data: Data) {
         // Guard against malformed UUID — see CallManager.swift:startCall for rationale.
-        let uuidSourceString: String
-        if self.isFromPushKit {
-            guard let stored = self.data else {
-                NSLog("[CallkitIncoming] connectedCall: PushKit branch but self.data is nil — ignored")
-                return
-            }
-            uuidSourceString = stored.uuid
-            self.isFromPushKit = false
-        } else {
-            uuidSourceString = data.uuid
-        }
-        guard let uuid = UUID(uuidString: uuidSourceString) else {
-            NSLog("[CallkitIncoming] connectedCall: invalid UUID '\(uuidSourceString)' — ignored")
+        guard let uuid = UUID(uuidString: data.uuid) else {
+            NSLog("[CallkitIncoming] connectedCall: invalid UUID '\(data.uuid)' — ignored")
             return
         }
         let call = Call(uuid: uuid, data: data)
@@ -463,7 +422,6 @@ public class SwiftFlutterCallkitIncomingPlugin: NSObject, FlutterPlugin, CXProvi
     }
     
     @objc public func endAllCalls() {
-        self.isFromPushKit = false
         self.callManager.endCallAlls()
     }
     
