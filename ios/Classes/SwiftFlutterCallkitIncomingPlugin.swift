@@ -721,7 +721,9 @@ public class SwiftFlutterCallkitIncomingPlugin: NSObject, FlutterPlugin, CXProvi
     public func providerDidReset(_ provider: CXProvider) {
         pendingAnswers.removeAll()
         pendingMutes.removeAll()
-        report("error", "provider_reset", "CallKit reset the provider with \(callManager.calls.count) call(s)")
+        // A reset with no calls ends nothing: worth a breadcrumb, not an error.
+        let callCount = callManager.calls.count
+        report(callCount == 0 ? "info" : "error", "provider_reset", "CallKit reset the provider with \(callCount) call(s)")
         for call in self.callManager.calls {
             call.endCall()
             sendEvent(SwiftFlutterCallkitIncomingPlugin.ACTION_CALL_ENDED, call.data.toJSON())

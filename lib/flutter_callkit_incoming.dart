@@ -58,8 +58,11 @@ class FlutterCallkitIncoming {
   /// Start an Outgoing call.
   /// On iOS, using Callkit(create a history into the Phone app).
   /// On Android, Nothing(only callback event listener).
-  static Future startCall(CallKitParams params) async {
-    await _channel.invokeMethod("startCall", params.toJson());
+  ///
+  /// Whether the call was started. False on iOS when CallKit refused the start
+  /// (the plugin reports why): CallKit then has no such call to end or mute.
+  static Future<bool> startCall(CallKitParams params) async {
+    return await _channel.invokeMethod<bool>("startCall", params.toJson()) ?? false;
   }
 
   /// Muting an Ongoing call.
