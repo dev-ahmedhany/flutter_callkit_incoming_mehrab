@@ -1,6 +1,7 @@
 package com.hiennv.flutter_callkit_incoming
 
 import android.app.Activity
+import android.app.ActivityManager
 import android.app.KeyguardManager
 import android.content.BroadcastReceiver
 import android.content.Context
@@ -8,6 +9,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.ActivityInfo
 import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -25,6 +27,7 @@ import de.hdodenhof.circleimageview.CircleImageView
 import kotlin.math.abs
 import android.view.ViewGroup.MarginLayoutParams
 import android.os.PowerManager
+import android.provider.Settings
 import android.text.TextUtils
 import android.util.Log
 
@@ -71,6 +74,8 @@ class CallkitIncomingActivity : Activity() {
     private lateinit var tvNumber: TextView
     private lateinit var ivLogo: ImageView
     private lateinit var ivAvatar: CircleImageView
+    private lateinit var tvAvatarInitial: TextView
+    private lateinit var tvBadge: TextView
 
     private lateinit var llAction: LinearLayout
     private lateinit var ivAcceptCall: ImageView
@@ -158,6 +163,8 @@ class CallkitIncomingActivity : Activity() {
         try {
             tvNameCaller.setTextColor(Color.parseColor(textColor))
             tvNumber.setTextColor(Color.parseColor(textColor))
+            tvBadge.setTextColor(Color.parseColor(textColor))
+            tvAvatarInitial.setTextColor(Color.parseColor(textColor))
         } catch (error: Exception) {
         }
 
@@ -174,6 +181,11 @@ class CallkitIncomingActivity : Activity() {
         }
 
         var avatarUrl = data?.getString(CallkitConstants.EXTRA_CALLKIT_AVATAR, "")
+        if (avatarUrl.isNullOrEmpty()) {
+            // No photo: show the caller's first letter instead of leaving a
+            // hole where the avatar would be.
+            showAvatarInitial(data?.getString(CallkitConstants.EXTRA_CALLKIT_NAME_CALLER, ""))
+        }
         if (!avatarUrl.isNullOrEmpty()) {
             ivAvatar.visibility = View.VISIBLE
             if (!avatarUrl.startsWith("http://", true) && !avatarUrl.startsWith("https://", true)) {
@@ -209,8 +221,22 @@ class CallkitIncomingActivity : Activity() {
         val backgroundColor =
             data?.getString(CallkitConstants.EXTRA_CALLKIT_BACKGROUND_COLOR, "#0955fa")
         try {
-            ivBackground.setBackgroundColor(Color.parseColor(backgroundColor))
+            // A three-stop gradient when the host app sent all three, the flat
+            // colour otherwise — so a host that knows nothing about gradients
+            // keeps exactly the background it has today. On low-RAM hardware
+            // the flat colour is used on purpose: plainer, not degraded.
+            val gradient = backgroundGradient(data)
+            if (gradient != null && !isLowEndDevice()) {
+                ivBackground.background = gradient
+            } else {
+                ivBackground.setBackgroundColor(Color.parseColor(backgroundColor))
+            }
         } catch (error: Exception) {
+        }
+        val badgeText = data?.getString(CallkitConstants.EXTRA_CALLKIT_BADGE_TEXT, "")
+        if (!badgeText.isNullOrEmpty()) {
+            tvBadge.text = badgeText
+            tvBadge.visibility = View.VISIBLE
         }
         var backgroundUrl = data?.getString(CallkitConstants.EXTRA_CALLKIT_BACKGROUND_URL, "")
         if (!backgroundUrl.isNullOrEmpty()) {
@@ -226,6 +252,58 @@ class CallkitIncomingActivity : Activity() {
                 data?.getSerializable(CallkitConstants.EXTRA_CALLKIT_HEADERS) as HashMap<String, Any?>
             ImageLoaderProvider.loadImage(this@CallkitIncomingActivity, backgroundUrl, headers, R.drawable.transparent, ivBackground)
         }
+    }
+
+    /**
+     * A three-stop gradient, or null when the host app did not send all three.
+     *
+     * Partial input is treated as no input on purpose: two of three stops is a
+     * caller mistake, and guessing the third would paint something nobody
+     * chose. The caller falls back to the flat background colour.
+     */
+    private fun backgroundGradient(data: Bundle?): GradientDrawable? {
+        val start = data?.getString(CallkitConstants.EXTRA_CALLKIT_BACKGROUND_GRADIENT_START, "")
+        val center = data?.getString(CallkitConstants.EXTRA_CALLKIT_BACKGROUND_GRADIENT_CENTER, "")
+        val end = data?.getString(CallkitConstants.EXTRA_CALLKIT_BACKGROUND_GRADIENT_END, "")
+        if (start.isNullOrEmpty() || center.isNullOrEmpty() || end.isNullOrEmpty()) return null
+        return try {
+            GradientDrawable(
+                GradientDrawable.Orientation.TL_BR,
+                intArrayOf(Color.parseColor(start), Color.parseColor(center), Color.parseColor(end))
+            ).apply { gradientType = GradientDrawable.LINEAR_GRADIENT }
+        } catch (error: Exception) {
+            null
+        }
+    }
+
+    /** The caller's first letter on a translucent disc, when there is no photo. */
+    private fun showAvatarInitial(name: String?) {
+        val initial = name?.trim()?.firstOrNull()?.toString().orEmpty()
+        if (initial.isEmpty()) return
+        tvAvatarInitial.text = initial
+        tvAvatarInitial.background = GradientDrawable().apply {
+            shape = GradientDrawable.OVAL
+            setColor(Color.parseColor("#26FFFFFF"))
+            setStroke(Utils.dpToPx(1f).toInt(), Color.parseColor("#80FFFFFF"))
+        }
+        tvAvatarInitial.visibility = View.VISIBLE
+    }
+
+    /**
+     * Whether this phone should get the plain screen. `isLowRamDevice` is the
+     * OS's own answer, set by the manufacturer for the hardware.
+     */
+    private fun isLowEndDevice(): Boolean = try {
+        (getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager)?.isLowRamDevice == true
+    } catch (error: Exception) {
+        false
+    }
+
+    /** False when the user has turned animations off system-wide. */
+    private fun animatorsEnabled(): Boolean = try {
+        Settings.Global.getFloat(contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) != 0f
+    } catch (error: Exception) {
+        true
     }
 
     private fun finishTimeout(data: Bundle?, duration: Long) {
@@ -247,12 +325,21 @@ class CallkitIncomingActivity : Activity() {
         llBackgroundAnimation = findViewById(R.id.llBackgroundAnimation)
         llBackgroundAnimation.layoutParams.height =
             Utils.getScreenWidth() + Utils.getStatusBarHeight(this@CallkitIncomingActivity)
-        llBackgroundAnimation.startRippleAnimation()
+        // The ripple is the one animation here that carries meaning — it says
+        // "ringing, now" — so it stays wherever the phone can afford it. It is
+        // skipped on low-RAM hardware, and when the user has turned animations
+        // off system-wide, because this screen is built on the UI thread while
+        // they are waiting for the phone to ring.
+        if (!isLowEndDevice() && animatorsEnabled()) {
+            llBackgroundAnimation.startRippleAnimation()
+        }
 
         tvNameCaller = findViewById(R.id.tvNameCaller)
         tvNumber = findViewById(R.id.tvNumber)
         ivLogo = findViewById(R.id.ivLogo)
         ivAvatar = findViewById(R.id.ivAvatar)
+        tvAvatarInitial = findViewById(R.id.tvAvatarInitial)
+        tvBadge = findViewById(R.id.tvBadge)
 
         llAction = findViewById(R.id.llAction)
 

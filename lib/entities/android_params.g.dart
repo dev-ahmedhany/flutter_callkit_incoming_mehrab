@@ -16,8 +16,12 @@ AndroidParams _$AndroidParamsFromJson(Map<String, dynamic> json) =>
       ringtonePath: json['ringtonePath'] as String?,
       backgroundColor: json['backgroundColor'] as String?,
       backgroundUrl: json['backgroundUrl'] as String?,
+      backgroundGradientStart: json['backgroundGradientStart'] as String?,
+      backgroundGradientCenter: json['backgroundGradientCenter'] as String?,
+      backgroundGradientEnd: json['backgroundGradientEnd'] as String?,
       actionColor: json['actionColor'] as String?,
       textColor: json['textColor'] as String?,
+      badgeText: json['badgeText'] as String?,
       incomingCallNotificationChannelName:
           json['incomingCallNotificationChannelName'] as String?,
       missedCallNotificationChannelName:
@@ -37,8 +41,12 @@ Map<String, dynamic> _$AndroidParamsToJson(AndroidParams instance) =>
       'ringtonePath': instance.ringtonePath,
       'backgroundColor': instance.backgroundColor,
       'backgroundUrl': instance.backgroundUrl,
+      'backgroundGradientStart': instance.backgroundGradientStart,
+      'backgroundGradientCenter': instance.backgroundGradientCenter,
+      'backgroundGradientEnd': instance.backgroundGradientEnd,
       'actionColor': instance.actionColor,
       'textColor': instance.textColor,
+      'badgeText': instance.badgeText,
       'incomingCallNotificationChannelName':
           instance.incomingCallNotificationChannelName,
       'missedCallNotificationChannelName':

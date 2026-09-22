@@ -19,7 +19,10 @@
     <dimen name="size_button_x2">120dp</dimen>
     <dimen name="size_button_x2_5">150dp</dimen>
 
-    <dimen name="size_text_name">24sp</dimen>
+    <!-- A ring is read in about two seconds, one-handed, often on a lock
+         screen in daylight. System dialers run 28-34sp. -->
+    <dimen name="size_text_name">30sp</dimen>
+    <dimen name="size_text_avatar_initial">56sp</dimen>
     <dimen name="size_text_action">14sp</dimen>
     <dimen name="size_text_sub">12sp</dimen>
 </resources>

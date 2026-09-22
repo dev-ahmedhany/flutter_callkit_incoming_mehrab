@@ -14,8 +14,12 @@ class AndroidParams {
     this.ringtonePath,
     this.backgroundColor,
     this.backgroundUrl,
+    this.backgroundGradientStart,
+    this.backgroundGradientCenter,
+    this.backgroundGradientEnd,
     this.actionColor,
     this.textColor,
+    this.badgeText,
     this.incomingCallNotificationChannelName,
     this.missedCallNotificationChannelName,
     this.isShowFullLockedScreen,
@@ -47,11 +51,32 @@ class AndroidParams {
   /// Using image background for Incoming call screen. example: http://... https://... or "assets/abc.png"
   final String? backgroundUrl;
 
+  /// Start colour of a three-stop background gradient, drawn top-left.
+  ///
+  /// All three stops must be set for the gradient to be used; with any of them
+  /// missing the screen falls back to the flat [backgroundColor], so an older
+  /// host app keeps exactly the background it has today.
+  final String? backgroundGradientStart;
+
+  /// Middle colour of the gradient, at 45%. Off-centre on purpose: a bright
+  /// band placed away from the middle is what reads as metal rather than as a
+  /// plastic two-colour ramp.
+  final String? backgroundGradientCenter;
+
+  /// End colour of the gradient, drawn bottom-right.
+  final String? backgroundGradientEnd;
+
   /// Color used in button/text on notification.
   final String? actionColor;
 
   /// Color used for the text in the full screen notification
   final String? textColor;
+
+  /// Short label shown under the caller's name, e.g. a plan or tier name.
+  ///
+  /// A word, not a colour: the background alone cannot be read by a screen
+  /// reader, in greyscale, or by anyone with colour blindness.
+  final String? badgeText;
 
   /// Notification channel name of incoming call.
   final String? incomingCallNotificationChannelName;

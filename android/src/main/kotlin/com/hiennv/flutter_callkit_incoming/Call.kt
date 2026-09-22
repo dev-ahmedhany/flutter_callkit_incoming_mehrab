@@ -75,6 +75,18 @@ data class Data(val args: Map<String, Any?>) {
     @JsonProperty("backgroundUrl")
     var backgroundUrl: String
 
+    @JsonProperty("backgroundGradientStart")
+    var backgroundGradientStart: String
+
+    @JsonProperty("backgroundGradientCenter")
+    var backgroundGradientCenter: String
+
+    @JsonProperty("backgroundGradientEnd")
+    var backgroundGradientEnd: String
+
+    @JsonProperty("badgeText")
+    var badgeText: String
+
     @JsonProperty("textColor")
     var textColor: String
 
@@ -152,6 +164,10 @@ data class Data(val args: Map<String, Any?>) {
         ringtonePath = android["ringtonePath"] as? String ?: ""
         backgroundColor = android["backgroundColor"] as? String ?: "#0955fa"
         backgroundUrl = android["backgroundUrl"] as? String ?: ""
+        backgroundGradientStart = android["backgroundGradientStart"] as? String ?: ""
+        backgroundGradientCenter = android["backgroundGradientCenter"] as? String ?: ""
+        backgroundGradientEnd = android["backgroundGradientEnd"] as? String ?: ""
+        badgeText = android["badgeText"] as? String ?: ""
         actionColor = android["actionColor"] as? String ?: "#4CAF50"
         textColor = android["textColor"] as? String ?: "#ffffff"
         incomingCallNotificationChannelName =
@@ -302,6 +318,19 @@ data class Data(val args: Map<String, Any?>) {
             CallkitConstants.EXTRA_CALLKIT_BACKGROUND_URL,
             backgroundUrl
         )
+        bundle.putString(
+            CallkitConstants.EXTRA_CALLKIT_BACKGROUND_GRADIENT_START,
+            backgroundGradientStart
+        )
+        bundle.putString(
+            CallkitConstants.EXTRA_CALLKIT_BACKGROUND_GRADIENT_CENTER,
+            backgroundGradientCenter
+        )
+        bundle.putString(
+            CallkitConstants.EXTRA_CALLKIT_BACKGROUND_GRADIENT_END,
+            backgroundGradientEnd
+        )
+        bundle.putString(CallkitConstants.EXTRA_CALLKIT_BADGE_TEXT, badgeText)
         bundle.putString(CallkitConstants.EXTRA_CALLKIT_TEXT_COLOR, textColor)
         bundle.putString(CallkitConstants.EXTRA_CALLKIT_ACTION_COLOR, actionColor)
         bundle.putString(CallkitConstants.EXTRA_CALLKIT_ACTION_FROM, from)
@@ -411,6 +440,14 @@ data class Data(val args: Map<String, Any?>) {
             )
             data.backgroundUrl =
                 bundle.getString(CallkitConstants.EXTRA_CALLKIT_BACKGROUND_URL, "")
+            data.backgroundGradientStart =
+                bundle.getString(CallkitConstants.EXTRA_CALLKIT_BACKGROUND_GRADIENT_START, "")
+            data.backgroundGradientCenter =
+                bundle.getString(CallkitConstants.EXTRA_CALLKIT_BACKGROUND_GRADIENT_CENTER, "")
+            data.backgroundGradientEnd =
+                bundle.getString(CallkitConstants.EXTRA_CALLKIT_BACKGROUND_GRADIENT_END, "")
+            data.badgeText =
+                bundle.getString(CallkitConstants.EXTRA_CALLKIT_BADGE_TEXT, "")
             data.actionColor = bundle.getString(
                 CallkitConstants.EXTRA_CALLKIT_ACTION_COLOR,
                 "#4CAF50"
