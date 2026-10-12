@@ -613,6 +613,9 @@ public class SwiftFlutterCallkitIncomingPlugin: NSObject, FlutterPlugin, CXProvi
         if(self.sharedProvider == nil){
             self.sharedProvider = CXProvider(configuration: createConfiguration(data))
             self.sharedProvider?.setDelegate(self, queue: nil)
+            // A start requested in the same breath as the provider's creation is one of the
+            // two explanations for CallKit refusing the first call after a launch.
+            report("info", "provider", "created")
         } else {
             self.sharedProvider?.configuration = createConfiguration(data)
         }

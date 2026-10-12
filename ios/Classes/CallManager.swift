@@ -149,10 +149,26 @@ class CallManager: NSObject {
     ) {
         callController.request(transaction) { error in
             if let error = error as NSError? {
+                if op == "start_call" {
+                    // Why CallKit refuses a start depends on what it already holds: another
+                    // app's call, or one of ours that never ended. The error does not say, so
+                    // say it first; the app keeps this as a breadcrumb for the failure below.
+                    self.reporter?("info", "start_call_refused", self.observedCallsSummary(), callId)
+                }
                 self.reporter?(failureType, op, "\(error.localizedDescription) (\(error.domain) \(error.code))", callId)
             }
             completion?(error == nil)
         }
+    }
+
+    /// Every call CallKit lists right now, ours or another app's, and how many this plugin tracks.
+    private func observedCallsSummary() -> String {
+        let observed = callController.callObserver.calls
+        let described = observed.map { call -> String in
+            let ours = callWithUUID(uuid: call.uuid) != nil
+            return "[ours=\(ours) outgoing=\(call.isOutgoing) connected=\(call.hasConnected) ended=\(call.hasEnded) held=\(call.isOnHold)]"
+        }
+        return "observed=\(observed.count) tracked=\(calls.count) \(described.joined(separator: " "))"
     }
 
 
