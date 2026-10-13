@@ -127,6 +127,32 @@ public class SwiftFlutterCallkitIncomingPlugin: NSObject, FlutterPlugin, CXProvi
         if sharedInstance == nil {
             sharedInstance = SwiftFlutterCallkitIncomingPlugin()
         }
+        sharedInstance.prepareProvider()
+    }
+
+    /// Creates the CallKit provider before any call needs it.
+    ///
+    /// It used to be created inside the first `startCall` or ring of a run, with the
+    /// transaction requested in the same turn. CallKit registers a provider with its daemon
+    /// asynchronously, and a start that gets there first is judged against a provider the
+    /// daemon does not know yet: no call groups allowed, so the first outgoing call after a
+    /// launch came back as `maximumCallGroupsReached` and ran without the system call screen.
+    /// `providerDidBegin` cannot be waited for instead: it fires locally, before the daemon
+    /// has heard anything. An `endCall` in a process that never rang was refused the same way,
+    /// as `unknownCallProvider`, after the daemon had waited ten seconds for a provider.
+    ///
+    /// The configuration here is a stand-in. `initCallkitProvider` replaces it with the
+    /// call's own (icon, ringtone, video) before every call, as it already did for every call
+    /// after the first.
+    private func prepareProvider() {
+        guard sharedProvider == nil else { return }
+        let data = Data(id: "", nameCaller: "", handle: "", type: 0)
+        // No icon yet: asking for one the app may not bundle would file a report at launch.
+        data.iconName = ""
+        let provider = CXProvider(configuration: createConfiguration(data))
+        provider.setDelegate(self, queue: nil)
+        sharedProvider = provider
+        callManager.setSharedProvider(provider)
     }
 
     public static func sharePluginWithRegister(with registrar: FlutterPluginRegistrar) {
@@ -613,9 +639,10 @@ public class SwiftFlutterCallkitIncomingPlugin: NSObject, FlutterPlugin, CXProvi
         if(self.sharedProvider == nil){
             self.sharedProvider = CXProvider(configuration: createConfiguration(data))
             self.sharedProvider?.setDelegate(self, queue: nil)
-            // A start requested in the same breath as the provider's creation is one of the
-            // two explanations for CallKit refusing the first call after a launch.
-            report("info", "provider", "created")
+            // `setup()` creates the provider at launch, so this is only reached by a host
+            // that never called it. A start requested in the same breath as the provider's
+            // creation is refused by CallKit; say so if it ever happens.
+            report("info", "provider", "created with the first call")
         } else {
             self.sharedProvider?.configuration = createConfiguration(data)
         }
