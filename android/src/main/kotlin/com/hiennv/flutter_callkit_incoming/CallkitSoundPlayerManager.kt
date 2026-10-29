@@ -11,10 +11,14 @@ import android.media.RingtoneManager
 import android.net.Uri
 import android.os.*
 import android.text.TextUtils
+import android.util.Log
+import java.util.concurrent.atomic.AtomicInteger
 
 class CallkitSoundPlayerManager(private val context: Context) {
 
     companion object {
+        private const val TAG = "CallkitSoundPlayer"
+
         @Volatile
         private var sharedInstance: CallkitSoundPlayerManager? = null
 
@@ -33,6 +37,29 @@ class CallkitSoundPlayerManager(private val context: Context) {
             }
     }
 
+    /**
+     * Where the ring is started and stopped: one task at a time, never on the main thread.
+     *
+     * `Ringtone.setAudioAttributes` resets a MediaPlayer, a binder call into the media
+     * server that waits for as long as that server is busy. It ran on the main thread while
+     * the call was coming in, and a slow media server froze the app into an ANR. A single
+     * thread keeps the order callers expect: a stop always runs after the play before it.
+     * The player is process-wide, so the thread lives as long as the process.
+     */
+    private val handler: Handler by lazy {
+        val thread = HandlerThread("CallkitSoundPlayer")
+        thread.start()
+        Handler(thread.looper)
+    }
+
+    /**
+     * Counts stops, on the caller's thread. A play still queued, or still setting up its
+     * ringtone, when a stop is asked for must not start ringing after it.
+     */
+    private val stops = AtomicInteger()
+
+    // The fields below are touched only on [handler]'s thread.
+
     private var vibrator: Vibrator? = null
     private var audioManager: AudioManager? = null
 
@@ -40,8 +67,11 @@ class CallkitSoundPlayerManager(private val context: Context) {
 
     private var isPlaying: Boolean = false
 
+    private var screenOffRegistered: Boolean = false
+
 
     inner class ScreenOffCallkitIncomingBroadcastReceiver : BroadcastReceiver() {
+        // Delivered on [handler]'s thread: see registerScreenOff.
         override fun onReceive(context: Context, intent: Intent) {
             if (isPlaying){
                 stop()
@@ -52,38 +82,64 @@ class CallkitSoundPlayerManager(private val context: Context) {
     private var screenOffCallkitIncomingBroadcastReceiver = ScreenOffCallkitIncomingBroadcastReceiver()
 
 
+    /** Starts ringing and vibrating for [data]. Returns at once; the work runs on [handler]. */
     fun play(data: Bundle) {
-        this.isPlaying = true
-        this.prepare()
-        this.playSound(data)
-        this.playVibrator()
-
-        val filter = IntentFilter(Intent.ACTION_SCREEN_OFF)
-        context.registerReceiver(screenOffCallkitIncomingBroadcastReceiver, filter)
+        val sound = data.getString(CallkitConstants.EXTRA_CALLKIT_RINGTONE_PATH, "")
+        val stopsBefore = stops.get()
+        post("play") {
+            if (stops.get() != stopsBefore) return@post
+            isPlaying = true
+            prepare()
+            playSound(sound, stopsBefore)
+            // A stop asked for meanwhile has its release queued behind this task.
+            if (stops.get() != stopsBefore) return@post
+            playVibrator()
+            registerScreenOff()
+        }
     }
 
+    /** Stops the ring, including one [play] is still setting up. Returns at once. */
     fun stop() {
-        this.isPlaying = false
-
-        ringtone?.stop()
-        vibrator?.cancel()
-        ringtone = null
-        vibrator = null
-        try {
-            context.unregisterReceiver(screenOffCallkitIncomingBroadcastReceiver)
-        }catch (_: Exception){}
+        stops.incrementAndGet()
+        post("stop") { release() }
     }
 
     fun destroy() {
+        stop()
+    }
+
+    private fun post(what: String, work: () -> Unit) {
+        handler.post {
+            // Off the main thread nothing catches for us, and a ring that cannot sound must
+            // not take the app down with it.
+            try {
+                work()
+            } catch (e: Exception) {
+                Log.e(TAG, "$what failed", e)
+            }
+        }
+    }
+
+    private fun release() {
         this.isPlaying = false
 
         ringtone?.stop()
         vibrator?.cancel()
         ringtone = null
         vibrator = null
-        try {
-            context.unregisterReceiver(screenOffCallkitIncomingBroadcastReceiver)
-        }catch (_: Exception){}
+        if (screenOffRegistered) {
+            screenOffRegistered = false
+            try {
+                context.unregisterReceiver(screenOffCallkitIncomingBroadcastReceiver)
+            }catch (_: Exception){}
+        }
+    }
+
+    private fun registerScreenOff() {
+        if (screenOffRegistered) return
+        val filter = IntentFilter(Intent.ACTION_SCREEN_OFF)
+        context.registerReceiver(screenOffCallkitIncomingBroadcastReceiver, filter, null, handler)
+        screenOffRegistered = true
     }
 
     private fun prepare() {
@@ -123,11 +179,8 @@ class CallkitSoundPlayerManager(private val context: Context) {
         }
     }
 
-    private fun playSound(data: Bundle?) {
-        val sound = data?.getString(
-            CallkitConstants.EXTRA_CALLKIT_RINGTONE_PATH,
-            ""
-        )
+    /** [stopsBefore] is [stops] when the play was asked for. */
+    private fun playSound(sound: String?, stopsBefore: Int) {
         val uri = sound?.let { getRingtoneUri(it) }
         if (uri == null) {
             // Failed to get ringtone url, can't play sound
@@ -148,6 +201,9 @@ class CallkitSoundPlayerManager(private val context: Context) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                 ringtone?.isLooping = true
             }
+            // Setting the ringtone up can wait on the media server for seconds. A stop asked
+            // for in that time must not be followed by the ring; its release clears this one.
+            if (stops.get() != stopsBefore) return
             ringtone?.play()
         } catch (e: Exception) {
             e.printStackTrace()
