@@ -544,10 +544,11 @@ public class SwiftFlutterCallkitIncomingPlugin: NSObject, FlutterPlugin, CXProvi
         }
     }
 
-    /// Answers held back until the app's media connects (`connectedCall`), for calls whose
-    /// audio the app leaves to CallKit. CallKit activates the audio session only once the
-    /// answer is fulfilled, so until then the call reads "connecting", not a silent
-    /// "connected".
+    /// Answers from CallKit's own screen held back until the app's media connects
+    /// (`connectedCall`), for calls whose audio the app leaves to CallKit. CallKit activates
+    /// the audio session only once the answer is fulfilled, so until then the call reads
+    /// "connecting", not a silent "connected". An answer the app asked for itself is never
+    /// held: see `provider(_:perform:)` for `CXAnswerCallAction`.
     private var pendingAnswers: [UUID: CXAnswerCallAction] = [:]
 
     private func fulfillPendingAnswer(_ uuid: UUID) {
@@ -569,6 +570,9 @@ public class SwiftFlutterCallkitIncomingPlugin: NSObject, FlutterPlugin, CXProvi
             completion?(false)
             return
         }
+        // Releases an answer from CallKit's screen that waits on this. A call still ringing
+        // is answered in CallKit from here instead, and that answer is fulfilled as soon as
+        // CallKit performs it.
         fulfillPendingAnswer(uuid)
         self.callManager.connectedCall(uuid: uuid, completion: completion)
     }
@@ -788,6 +792,8 @@ public class SwiftFlutterCallkitIncomingPlugin: NSObject, FlutterPlugin, CXProvi
     }
 
     public func provider(_ provider: CXProvider, perform action: CXAnswerCallAction) {
+        // The answer `connectedCall` requested, or else the user's on CallKit's own screen.
+        let answeredInApp = callManager.takeAppAnswer(action.callUUID)
         guard let call = self.callManager.callWithUUID(uuid: action.callUUID) else{
             report("error", "answer", "no such call", callId: action.callUUID.uuidString)
             action.fail()
@@ -804,14 +810,20 @@ public class SwiftFlutterCallkitIncomingPlugin: NSObject, FlutterPlugin, CXProvi
         sendEvent(SwiftFlutterCallkitIncomingPlugin.ACTION_CALL_ACCEPT, call.data.toJSON())
         if let appDelegate = UIApplication.shared.delegate as? CallkitIncomingAppDelegate {
             appDelegate.onAccept(call, action)
-        } else if !call.data.configureAudioSession {
+        } else if !call.data.configureAudioSession && !answeredInApp {
             let uuid = action.callUUID
             pendingAnswers[uuid] = action
             // Never longer than this: a slow network still answers.
             DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(5)) { [weak self] in
-                self?.fulfillPendingAnswer(uuid)
+                guard let self = self, self.pendingAnswers[uuid] != nil else { return }
+                self.report("info", "answer", "no callConnected within 5 s: answered anyway", callId: uuid.uuidString)
+                self.fulfillPendingAnswer(uuid)
             }
         } else {
+            // This plugin configures the audio, or the app asked for this answer itself
+            // (`connectedCall`), which already is the signal held answers wait for. Holding
+            // that one back too kept CallKit's audio session closed for those 5 s, and the
+            // microphone the app published in the meantime never came up.
             action.fulfill()
         }
     }

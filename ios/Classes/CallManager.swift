@@ -18,6 +18,12 @@ class CallManager: NSObject {
     /// The data of outgoing calls Dart asked to start, until CallKit performs the start action.
     private var pendingStarts = [UUID: Data]()
 
+    /// Incoming calls the app answered itself (`connectedCall`), until CallKit performs the
+    /// answer action it requested. An answer from CallKit's own screen is held back until the
+    /// app's media connects; this one comes from the app being ready, and holding it too kept
+    /// the audio session closed while the app published its microphone.
+    private var appAnswers = Set<UUID>()
+
     /// Receives transaction failures as `(type, op, detail, callId)`, so they reach Dart
     /// instead of only the console.
     var reporter: ((_ type: String, _ op: String, _ detail: String, _ callId: String?) -> Void)?
@@ -85,8 +91,9 @@ class CallManager: NSObject {
     ///
     /// An outgoing call reports connected. An incoming call answered in CallKit only records
     /// it. One answered in the app while CallKit still shows it ringing is answered in CallKit
-    /// too. A call is never answered twice: the answer action makes the app hear ACCEPT again,
-    /// and answering on that would loop.
+    /// too, and that answer is marked as the app's (`takeAppAnswer`). A call is never answered
+    /// twice: the answer action makes the app hear ACCEPT again, and answering on that would
+    /// loop.
     func connectedCall(uuid: UUID, completion: ((Bool) -> Void)? = nil) {
         guard let call = callWithUUID(uuid: uuid) else {
             reporter?("info", "call_connected", "no such call", uuid.uuidString)
@@ -102,13 +109,24 @@ class CallManager: NSObject {
             completion?(true)
             return
         }
+        // Marked before the request: CallKit may perform the action before this completion.
+        appAnswers.insert(uuid)
         let answerAction = CXAnswerCallAction(call: uuid)
         requestCall(CXTransaction(action: answerAction), op: "answer_call", callId: call.data.uuid) { ok in
             if ok {
                 call.hasConnected = true
+            } else {
+                // Refused: no answer action is coming for this request.
+                self.appAnswers.remove(uuid)
             }
             completion?(ok)
         }
+    }
+
+    /// Whether the answer action CallKit performs for `uuid` is the one `connectedCall`
+    /// requested, said once.
+    func takeAppAnswer(_ uuid: UUID) -> Bool {
+        return appAnswers.remove(uuid) != nil
     }
 
     func endCallAlls() {
@@ -194,12 +212,15 @@ class CallManager: NSObject {
     func removeCall(_ call: Call){
         guard let idx = calls.firstIndex(where: { $0 === call }) else { return }
         calls.remove(at: idx)
+        // An answer still in flight for a call that ended means nothing now.
+        appAnswers.remove(call.uuid)
         callsChangedHandler?()
         postCallNotification()
     }
 
     func removeAllCalls() {
         calls.removeAll()
+        appAnswers.removeAll()
         callsChangedHandler?()
         postCallNotification()
     }
