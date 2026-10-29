@@ -54,6 +54,21 @@
                 app:civ_border_color="#80ffffff"
                 app:civ_border_width="1dp" />
 
+            <!-- Stands in for a caller with no photo, as in the phone layout.
+                 CallkitIncomingActivity binds every view of that layout, so a
+                 view missing here crashes the ring on a landscape tablet. -->
+            <TextView
+                android:id="@+id/tvAvatarInitial"
+                android:layout_width="@dimen/size_avatar"
+                android:layout_height="@dimen/size_avatar"
+                android:layout_centerInParent="true"
+                android:gravity="center"
+                android:includeFontPadding="false"
+                android:textSize="@dimen/size_text_avatar_initial"
+                android:visibility="invisible"
+                tools:ignore="ContentDescription"
+                tools:text="أ" />
+
 
             <LinearLayout
                 android:layout_width="wrap_content"
@@ -94,6 +109,21 @@
                     android:textColor="@color/action_text"
                     android:textSize="@dimen/size_text_action"
                     tools:text="Some info" />
+
+                <!-- A word for what the background is saying. The gradient
+                     alone cannot be read by a screen reader, in greyscale, or
+                     by anyone with colour blindness. -->
+                <TextView
+                    android:id="@+id/tvBadge"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="@dimen/base_margin_half"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:textSize="@dimen/size_text_action"
+                    android:textStyle="bold"
+                    android:visibility="gone"
+                    tools:text="بلس+" />
 
             </LinearLayout>
 
